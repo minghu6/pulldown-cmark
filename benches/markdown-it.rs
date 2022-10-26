@@ -18,7 +18,7 @@ pub fn markdown_it_samples(c: &mut Criterion) {
 
             c.bench_function(filename, |b| {
                 b.iter(|| {
-                    html::push_html(&mut result, Parser::new(&corpus));
+                    html::push_html(Parser::new(&corpus), &mut result);
                 })
             });
         }

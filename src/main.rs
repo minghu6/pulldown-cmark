@@ -109,9 +109,9 @@ pub fn main() -> std::io::Result<()> {
         dry_run(&input, opts);
     } else {
         let mut p = Parser::new_ext(&input, opts);
-        let stdio = io::stdout();
-        let buffer = std::io::BufWriter::with_capacity(1024 * 1024, stdio.lock());
-        html::write_html(buffer, &mut p)?;
+        let mut cache = &mut String::new();
+        html::push_html(&mut p, &mut cache);
+        println!("{cache}");
         // Since the program will now terminate and the memory will be returned
         // to the operating system anyway, there is no point in tidely cleaning
         // up all the datastructures we have used. We shouldn't do this if we'd

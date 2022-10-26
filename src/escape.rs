@@ -21,9 +21,10 @@
 //! Utility functions for HTML escaping. Only useful when building your own
 //! HTML renderer.
 
-use std::fmt::{Arguments, Write as FmtWrite};
-use std::io::{self, ErrorKind, Write};
-use std::str::from_utf8;
+use std::{
+    fmt,
+    str::from_utf8,
+};
 
 #[rustfmt::skip]
 static HREF_SAFE: [u8; 128] = [
@@ -41,69 +42,10 @@ static HEX_CHARS: &[u8] = b"0123456789ABCDEF";
 static AMP_ESCAPE: &str = "&amp;";
 static SINGLE_QUOTE_ESCAPE: &str = "&#x27;";
 
-/// This wrapper exists because we can't have both a blanket implementation
-/// for all types implementing `Write` and types of the for `&mut W` where
-/// `W: StrWrite`. Since we need the latter a lot, we choose to wrap
-/// `Write` types.
-#[derive(Debug)]
-pub struct WriteWrapper<W>(pub W);
-
-/// Trait that allows writing string slices. This is basically an extension
-/// of `std::io::Write` in order to include `String`.
-pub trait StrWrite {
-    fn write_str(&mut self, s: &str) -> io::Result<()>;
-
-    fn write_fmt(&mut self, args: Arguments) -> io::Result<()>;
-}
-
-impl<W> StrWrite for WriteWrapper<W>
-where
-    W: Write,
-{
-    #[inline]
-    fn write_str(&mut self, s: &str) -> io::Result<()> {
-        self.0.write_all(s.as_bytes())
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, args: Arguments) -> io::Result<()> {
-        self.0.write_fmt(args)
-    }
-}
-
-impl<'w> StrWrite for String {
-    #[inline]
-    fn write_str(&mut self, s: &str) -> io::Result<()> {
-        self.push_str(s);
-        Ok(())
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, args: Arguments) -> io::Result<()> {
-        // FIXME: translate fmt error to io error?
-        FmtWrite::write_fmt(self, args).map_err(|_| ErrorKind::Other.into())
-    }
-}
-
-impl<W> StrWrite for &'_ mut W
-where
-    W: StrWrite,
-{
-    #[inline]
-    fn write_str(&mut self, s: &str) -> io::Result<()> {
-        (**self).write_str(s)
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, args: Arguments) -> io::Result<()> {
-        (**self).write_fmt(args)
-    }
-}
-
 /// Writes an href to the buffer, escaping href unsafe bytes.
-pub fn escape_href<W>(mut w: W, s: &str) -> io::Result<()>
+pub fn escape_href<W>(mut w: W, s: &str) -> fmt::Result
 where
-    W: StrWrite,
+    W: std::fmt::Write,
 {
     let bytes = s.as_bytes();
     let mut mark = 0;
@@ -153,7 +95,7 @@ static HTML_ESCAPES: [&str; 5] = ["", "&quot;", "&amp;", "&lt;", "&gt;"];
 
 /// Writes the given string to the Write sink, replacing special HTML bytes
 /// (<, >, &, ") by escape sequences.
-pub fn escape_html<W: StrWrite>(w: W, s: &str) -> io::Result<()> {
+pub fn escape_html<W: std::fmt::Write>(w: W, s: &str) -> fmt::Result {
     #[cfg(all(target_arch = "x86_64", feature = "simd"))]
     {
         simd::escape_html(w, s)
@@ -164,7 +106,7 @@ pub fn escape_html<W: StrWrite>(w: W, s: &str) -> io::Result<()> {
     }
 }
 
-fn escape_html_scalar<W: StrWrite>(mut w: W, s: &str) -> io::Result<()> {
+fn escape_html_scalar<W: std::fmt::Write>(mut w: W, s: &str) -> fmt::Result {
     let bytes = s.as_bytes();
     let mut mark = 0;
     let mut i = 0;
@@ -198,7 +140,7 @@ mod simd {
 
     const VECTOR_SIZE: usize = size_of::<__m128i>();
 
-    pub(super) fn escape_html<W: StrWrite>(mut w: W, s: &str) -> io::Result<()> {
+    pub(super) fn escape_html<W: StrWrite>(mut w: W, s: &str) -> fmt::Result<()> {
         // The SIMD accelerated code uses the PSHUFB instruction, which is part
         // of the SSSE3 instruction set. Further, we can only use this code if
         // the buffer is at least one VECTOR_SIZE in length to prevent reading
@@ -278,9 +220,9 @@ mod simd {
         bytes: &[u8],
         mut offset: usize,
         mut callback: F,
-    ) -> io::Result<()>
+    ) -> fmt::Result<()>
     where
-        F: FnMut(usize) -> io::Result<()>,
+        F: FnMut(usize) -> fmt::Result<()>,
     {
         // The strategy here is to walk the byte buffer in chunks of VECTOR_SIZE (16)
         // bytes at a time starting at the given offset. For each chunk, we compute a

@@ -26,7 +26,7 @@ pub fn test_markdown_html(input: &str, output: &str, smart_punct: bool) {
     opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
 
     let p = Parser::new_ext(input, opts);
-    pulldown_cmark::html::push_html(&mut s, p);
+    pulldown_cmark::html::push_html(p, &mut s);
 
     assert_eq!(normalize_html(output), normalize_html(&s));
 }

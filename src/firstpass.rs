@@ -1,19 +1,19 @@
 //! The first pass resolves all block structure, generating an AST. Within a block, items
 //! are in a linear chain with potential inline markup identified.
 
-use std::cmp::max;
-use std::ops::Range;
+use std::{cmp::max, ops::Range};
 
-use crate::parse::{scan_containers, Allocations, HeadingAttributes, Item, ItemBody, LinkDef};
-use crate::scanners::*;
-use crate::strings::CowStr;
-use crate::tree::{Tree, TreeIndex};
-use crate::Options;
 use crate::{
     linklabel::{scan_link_label_rest, LinkLabel},
-    HeadingLevel,
+    parse::{scan_containers, Allocations, HeadingAttributes, Item, ItemBody, LinkDef},
+    scanners::*,
+    strings::CowStr,
+    tree::{Tree, TreeIndex},
+    HeadingLevel, Options,
 };
 
+use lazy_static::lazy_static;
+use regex::bytes::Regex;
 use unicase::UniCase;
 
 /// Runs the first pass, which resolves the block structure of the document,
@@ -46,6 +46,11 @@ struct FirstPass<'a, 'b> {
     lookup_table: &'b LookupTable,
 }
 
+enum LatexDelim {
+    Dollar,
+    Bracket,
+}
+
 impl<'a, 'b> FirstPass<'a, 'b> {
     fn run(mut self) -> (Tree<Item>, Allocations<'a>) {
         let mut ix = 0;
@@ -66,6 +71,11 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         let i = scan_containers(&self.tree, &mut line_start);
         for _ in i..self.tree.spine_len() {
             self.pop(start_ix);
+        }
+
+        // Latex Blocks
+        if self.options.contains(Options::ENABELE_LATEX) {
+            start_ix = self.parse_block_latex(start_ix);
         }
 
         if self.options.contains(Options::ENABLE_FOOTNOTES) {
@@ -199,6 +209,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         if let Some((n, fence_ch)) = scan_code_fence(&bytes[ix..]) {
             return self.parse_fenced_code_block(ix, indent, fence_ch, n);
         }
+
         self.parse_paragraph(ix)
     }
 
@@ -320,11 +331,17 @@ impl<'a, 'b> FirstPass<'a, 'b> {
 
         let mut ix = start_ix;
         loop {
+
+            if self.options.contains(Options::ENABELE_LATEX) {
+                ix = self.parse_block_latex(ix);
+            }
+
             let scan_mode = if self.options.contains(Options::ENABLE_TABLES) && ix == start_ix {
                 TableParseMode::Scan
             } else {
                 TableParseMode::Disabled
             };
+    
             let (next_ix, brk) = self.parse_line(ix, None, scan_mode);
 
             // break out when we find a table
@@ -854,6 +871,64 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         ix
     }
 
+    fn parse_block_latex(&mut self, start_ix: usize) -> usize {
+        lazy_static! {
+            static ref REG_LATEX_DOLLAR: Regex = Regex::new(r"\$\$(?s).*?\$\$").unwrap();
+            static ref REG_LATEX_BRACKET: Regex = Regex::new(r"\\\[(?s).*?\\\]").unwrap();
+        }
+        let bytes = self.text.as_bytes();
+        let delim;
+
+        // println!("en: {}", &self.text[start_ix..]);
+
+        let n = scan_ws(&bytes[start_ix..]);
+        
+        if start_ix + n + 1 >= bytes.len() {
+            return start_ix;
+        }
+
+        if bytes[start_ix + n] == b'$' && bytes[start_ix + n + 1] == b'$' {
+            delim = LatexDelim::Dollar
+        }
+        else if bytes[start_ix + n] == b'\\' && bytes[start_ix + n + 1] == b'[' {
+            delim = LatexDelim::Bracket
+        }
+        else {
+            return start_ix;
+        }
+
+        let cap = 
+        match delim {
+            LatexDelim::Dollar => {
+                REG_LATEX_DOLLAR.captures(&bytes[start_ix + n..])
+            },
+            LatexDelim::Bracket => {
+                REG_LATEX_BRACKET.captures(&bytes[start_ix + n..])
+            }
+        };
+
+        if let Some(caps) = cap {
+            let cap0 = caps.get(0).unwrap();
+
+            // println!("cap0.range: {:?}", cap0.range());
+            // println!("cap0: {}", cap0.as_str());
+            let start = start_ix + 0;
+            let end = start_ix + n + cap0.end();
+
+            self.tree.append(Item {
+                start,
+                end,
+                body: ItemBody::BlockLatex,
+            });
+
+            end
+        }
+        else {
+            start_ix
+        }
+
+    }
+
     fn parse_fenced_code_block(
         &mut self,
         start_ix: usize,
@@ -1262,6 +1337,21 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             )
         });
         (content_end, attrs)
+    }
+}
+
+
+/// Space number including CRLF
+fn scan_ws(text: &[u8]) -> usize {
+    lazy_static! {
+        static ref REG_WS: Regex = Regex::new(r"\s*").unwrap();
+    }
+
+    if let Some(cap) = REG_WS.captures(text) {
+        cap.get(0).unwrap().end()
+    }
+    else {
+        0
     }
 }
 

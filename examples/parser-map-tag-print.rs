@@ -68,6 +68,6 @@ fn main() {
     });
    
     let mut html_output = String::new();
-    pulldown_cmark::html::push_html(&mut html_output, parser);
+    pulldown_cmark::html::push_html(parser, &mut html_output);
     println!("\nHTML output:\n{}\n", &html_output);
 }

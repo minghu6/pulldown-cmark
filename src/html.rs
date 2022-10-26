@@ -20,10 +20,9 @@
 
 //! HTML renderer that takes an iterator of events as input.
 
-use std::collections::HashMap;
-use std::io::{self, Write};
+use std::{collections::HashMap, fmt};
 
-use crate::escape::{escape_href, escape_html, StrWrite, WriteWrapper};
+use crate::escape::{escape_href, escape_html};
 use crate::strings::CowStr;
 use crate::Event::*;
 use crate::{Alignment, CodeBlockKind, Event, LinkType, Tag};
@@ -52,7 +51,7 @@ struct HtmlWriter<'a, I, W> {
 impl<'a, I, W> HtmlWriter<'a, I, W>
 where
     I: Iterator<Item = Event<'a>>,
-    W: StrWrite,
+    W: std::fmt::Write,
 {
     fn new(iter: I, writer: W) -> Self {
         Self {
@@ -67,14 +66,14 @@ where
     }
 
     /// Writes a new line.
-    fn write_newline(&mut self) -> io::Result<()> {
+    fn write_newline(&mut self) -> fmt::Result {
         self.end_newline = true;
         self.writer.write_str("\n")
     }
 
     /// Writes a buffer, and tracks whether or not a newline was written.
     #[inline]
-    fn write(&mut self, s: &str) -> io::Result<()> {
+    fn write(&mut self, s: &str) -> fmt::Result {
         self.writer.write_str(s)?;
 
         if !s.is_empty() {
@@ -83,7 +82,7 @@ where
         Ok(())
     }
 
-    fn run(mut self) -> io::Result<()> {
+    fn run(mut self) -> fmt::Result{
         while let Some(event) = self.iter.next() {
             match event {
                 Start(tag) => {
@@ -92,7 +91,7 @@ where
                 End(tag) => {
                     self.end_tag(tag)?;
                 }
-                Text(text) => {
+                Text(text) | BlockLatex(text) => {
                     escape_html(&mut self.writer, &text)?;
                     self.end_newline = text.ends_with('\n');
                 }
@@ -138,7 +137,7 @@ where
     }
 
     /// Writes the start of an HTML tag.
-    fn start_tag(&mut self, tag: Tag<'a>) -> io::Result<()> {
+    fn start_tag(&mut self, tag: Tag<'a>) -> fmt::Result{
         match tag {
             Tag::Paragraph => {
                 if self.end_newline {
@@ -304,7 +303,7 @@ where
         }
     }
 
-    fn end_tag(&mut self, tag: Tag) -> io::Result<()> {
+    fn end_tag(&mut self, tag: Tag) -> fmt::Result{
         match tag {
             Tag::Paragraph => {
                 self.write("</p>\n")?;
@@ -371,7 +370,7 @@ where
     }
 
     // run raw text, consuming end tag
-    fn raw_text(&mut self) -> io::Result<()> {
+    fn raw_text(&mut self) -> fmt::Result{
         let mut nest = 0;
         while let Some(event) = self.iter.next() {
             match event {
@@ -382,7 +381,7 @@ where
                     }
                     nest -= 1;
                 }
-                Html(text) | Code(text) | Text(text) => {
+                Html(text) | Code(text) | Text(text) | BlockLatex(text) => {
                     escape_html(&mut self.writer, &text)?;
                     self.end_newline = text.ends_with('\n');
                 }
@@ -420,7 +419,7 @@ where
 /// let parser = Parser::new(markdown_str);
 ///
 /// let mut html_buf = String::new();
-/// html::push_html(&mut html_buf, parser);
+/// html::push_html(parser, &mut html_buf);
 ///
 /// assert_eq!(html_buf, r#"<h1>hello</h1>
 /// <ul>
@@ -429,50 +428,10 @@ where
 /// </ul>
 /// "#);
 /// ```
-pub fn push_html<'a, I>(s: &mut String, iter: I)
+pub fn push_html<'a, I, W>(iter: I, writer: W)
 where
     I: Iterator<Item = Event<'a>>,
+    W: fmt::Write,
 {
-    HtmlWriter::new(iter, s).run().unwrap();
-}
-
-/// Iterate over an `Iterator` of `Event`s, generate HTML for each `Event`, and
-/// write it out to a writable stream.
-///
-/// **Note**: using this function with an unbuffered writer like a file or socket
-/// will result in poor performance. Wrap these in a
-/// [`BufWriter`](https://doc.rust-lang.org/std/io/struct.BufWriter.html) to
-/// prevent unnecessary slowdowns.
-///
-/// # Examples
-///
-/// ```
-/// use pulldown_cmark::{html, Parser};
-/// use std::io::Cursor;
-///
-/// let markdown_str = r#"
-/// hello
-/// =====
-///
-/// * alpha
-/// * beta
-/// "#;
-/// let mut bytes = Vec::new();
-/// let parser = Parser::new(markdown_str);
-///
-/// html::write_html(Cursor::new(&mut bytes), parser);
-///
-/// assert_eq!(&String::from_utf8_lossy(&bytes)[..], r#"<h1>hello</h1>
-/// <ul>
-/// <li>alpha</li>
-/// <li>beta</li>
-/// </ul>
-/// "#);
-/// ```
-pub fn write_html<'a, I, W>(writer: W, iter: I) -> io::Result<()>
-where
-    I: Iterator<Item = Event<'a>>,
-    W: Write,
-{
-    HtmlWriter::new(iter, WriteWrapper(writer)).run()
+    HtmlWriter::new(iter, writer).run().unwrap()
 }

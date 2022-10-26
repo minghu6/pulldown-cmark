@@ -40,7 +40,7 @@
 //!
 //! // Write to String buffer.
 //! let mut html_output = String::new();
-//! html::push_html(&mut html_output, parser);
+//! html::push_html(parser, &mut html_output);
 //!
 //! // Check that the output is what we expected.
 //! let expected_html = "<p>Hello world, this is a <del>complicated</del> <em>very simple</em> example.</p>\n";
@@ -59,6 +59,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod html;
+pub mod md;
 
 mod entities;
 pub mod escape;
@@ -238,6 +239,9 @@ pub enum Event<'a> {
     /// A text node.
     #[cfg_attr(feature = "serde", serde(borrow))]
     Text(CowStr<'a>),
+    /// A block latex (text) node.
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    BlockLatex(CowStr<'a>),
     /// An inline code node.
     #[cfg_attr(feature = "serde", serde(borrow))]
     Code(CowStr<'a>),
@@ -286,5 +290,7 @@ bitflags::bitflags! {
         /// with the content `text`, ID `id`, and classes `class1` and `class2`.
         /// Note that attributes (ID and classes) should be space-separated.
         const ENABLE_HEADING_ATTRIBUTES = 1 << 6;
+
+        const ENABELE_LATEX = 1 << 7;
     }
 }

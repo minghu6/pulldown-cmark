@@ -49,10 +49,12 @@ pub(crate) struct Item {
     pub body: ItemBody,
 }
 
+#[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum ItemBody {
     Paragraph,
     Text,
+    BlockLatex,
     SoftBreak,
     HardBreak,
 
@@ -78,6 +80,9 @@ pub(crate) enum ItemBody {
     Image(LinkIndex),
     FootnoteReference(CowIndex),
     TaskListMarker(bool), // true for checked
+    #[allow(unused)]
+    InlineLatex,
+
 
     Rule,
     Heading(HeadingLevel, Option<HeadingIndex>), // heading level
@@ -1441,6 +1446,7 @@ fn item_to_tag<'a>(item: &Item, allocs: &Allocations<'a>) -> Tag<'a> {
 fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Event<'a> {
     let tag = match item.body {
         ItemBody::Text => return Event::Text(text[item.start..item.end].into()),
+        ItemBody::BlockLatex => return Event::BlockLatex(text[item.start..item.end].into()),
         ItemBody::Code(cow_ix) => return Event::Code(allocs[cow_ix].clone()),
         ItemBody::SynthesizeText(cow_ix) => return Event::Text(allocs[cow_ix].clone()),
         ItemBody::SynthesizeChar(c) => return Event::Text(c.into()),
@@ -1735,7 +1741,7 @@ mod test {
         let expected = "<p><a href=\"https://vincentprouillet.com\">My site</a></p>\n";
 
         let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
+        crate::html::push_html(Parser::new(test_str), &mut buf);
         assert_eq!(expected, buf);
     }
 
@@ -1745,7 +1751,7 @@ mod test {
         let expected = "<p>a <a href=\"yolo\">^a</a></p>\n";
 
         let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
+        crate::html::push_html(Parser::new(test_str), &mut buf);
         assert_eq!(expected, buf);
     }
 
@@ -1755,7 +1761,7 @@ mod test {
         let expected = "";
 
         let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
+        crate::html::push_html(Parser::new(test_str), &mut buf);
         assert_eq!(expected, buf);
     }
 
@@ -1765,7 +1771,7 @@ mod test {
         let expected = "<p><a href=\"/u\">a</a></p>\n";
 
         let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
+        crate::html::push_html(Parser::new(test_str), &mut buf);
         assert_eq!(expected, buf);
     }
 
@@ -1775,7 +1781,7 @@ mod test {
         let expected = "<p>[a]:</p>\n";
 
         let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
+        crate::html::push_html(Parser::new(test_str), &mut buf);
         assert_eq!(expected, buf);
     }
 

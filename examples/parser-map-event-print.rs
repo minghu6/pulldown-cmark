@@ -21,11 +21,12 @@ fn main() {
             Event::SoftBreak => println!("SoftBreak"),
             Event::HardBreak => println!("HardBreak"),
             Event::Rule => println!("Rule"),
+            _ => ()
         };
         event
     });
 
     let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
+    html::push_html(parser, &mut html_output);
     println!("\nHTML output:\n{}\n", &html_output);
 }

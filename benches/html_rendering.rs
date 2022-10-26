@@ -18,7 +18,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         b.iter(|| {
             buf.clear();
-            html::push_html(&mut buf, Parser::new_ext(input, Options::empty()));
+            html::push_html(Parser::new_ext(input, Options::empty()), &mut buf);
         })
     });
 
@@ -29,7 +29,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         b.iter(|| {
             buf.clear();
-            html::push_html(&mut buf, events.clone().into_iter());
+            html::push_html(events.clone().into_iter(), &mut buf);
         })
     });
 
