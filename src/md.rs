@@ -523,7 +523,9 @@ where
                 consume_newlines(&mut formatter, &mut state)?;
                 state.last_was_text_without_trailing_newline = !text.ends_with('\n');
                 print_text_without_trailing_newline(
-                    &escape_leading_special_characters(text, state.is_in_code_block, &options),
+                    &text,
+                    // why we should escape special characters
+                    // &escape_leading_special_characters(text, state.is_in_code_block, &options),
                     &mut formatter,
                     &state.padding,
                 )
