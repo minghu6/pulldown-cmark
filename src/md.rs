@@ -173,6 +173,7 @@ where
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn escape_leading_special_characters<'a>(
         t: &'a str,
         is_in_block_quote: bool,
@@ -530,8 +531,11 @@ where
                     &state.padding,
                 )
             }
-            BlockLatex(ref text) => {
+            BlockLaTex(ref text) => {
                 write!(&mut formatter, "\n{}\n", text)
+            }
+            InlineLaTex(ref text) => {
+                write!(&mut formatter, "${}$", text)
             }
             Html(ref text) => {
                 state.last_was_html = true;

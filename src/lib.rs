@@ -241,7 +241,10 @@ pub enum Event<'a> {
     Text(CowStr<'a>),
     /// A block latex (text) node.
     #[cfg_attr(feature = "serde", serde(borrow))]
-    BlockLatex(CowStr<'a>),
+    InlineLaTex(CowStr<'a>),
+    /// A block latex (text) node.
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    BlockLaTex(CowStr<'a>),
     /// An inline code node.
     #[cfg_attr(feature = "serde", serde(borrow))]
     Code(CowStr<'a>),

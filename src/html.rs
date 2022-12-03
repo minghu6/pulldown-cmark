@@ -91,9 +91,12 @@ where
                 End(tag) => {
                     self.end_tag(tag)?;
                 }
-                Text(text) | BlockLatex(text) => {
+                Text(text) => {
                     escape_html(&mut self.writer, &text)?;
                     self.end_newline = text.ends_with('\n');
+                }
+                BlockLaTex(text) | InlineLaTex(text) => {
+                    self.write(&text)?;
                 }
                 Code(text) => {
                     self.write("<code>")?;
@@ -381,9 +384,12 @@ where
                     }
                     nest -= 1;
                 }
-                Html(text) | Code(text) | Text(text) | BlockLatex(text) => {
+                Html(text) | Code(text) | Text(text) => {
                     escape_html(&mut self.writer, &text)?;
                     self.end_newline = text.ends_with('\n');
+                }
+                InlineLaTex(text) | BlockLaTex(text) => {
+                    self.write(&text)?;
                 }
                 SoftBreak | HardBreak | Rule => {
                     self.write(" ")?;

@@ -1,4 +1,4 @@
-use pulldown_cmark::{Parser, Options, Event::*};
+use pulldown_cmark::{Parser, Options, Event::*, md::push_md};
 
 
 fn test_latex(original: &str, blocklatex: &str) {
@@ -9,12 +9,12 @@ fn test_latex(original: &str, blocklatex: &str) {
     //         e => println!("{e:?}")
     //     }
     // }
-    
+
     let p = Parser::new_ext(&original, Options::all());
     let mut no_latex = true;
     for event in p {
         match event {
-            BlockLatex(s) => {
+            BlockLaTex(s) => {
                 no_latex = false;
                 assert_eq!(s.trim(), blocklatex.trim())
             },
@@ -67,6 +67,18 @@ $$
 
     test_latex(&original, blocklatex);
 
+}
+
+#[test]
+fn latex_push_back_test() {
+    let original = r##"asc`push` $\{1,2\}$ def"##;
+
+    let parser = Parser::new_ext(&original, Options::all());
+    let mut cache = String::new();
+
+    push_md(parser, &mut cache).unwrap();
+
+    println!("{cache}");
 }
 
 

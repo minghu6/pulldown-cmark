@@ -28,7 +28,7 @@ use std::ops::{Index, Range};
 
 use unicase::UniCase;
 
-use crate::firstpass::run_first_pass;
+use crate::firstpass::{run_first_pass, LatexDelim};
 use crate::linklabel::{scan_link_label_rest, LinkLabel, ReferenceLabel};
 use crate::scanners::*;
 use crate::strings::CowStr;
@@ -65,6 +65,7 @@ pub(crate) enum ItemBody {
     // quote byte, can_open, can_close
     MaybeSmartQuote(u8, bool, bool),
     MaybeCode(usize, bool), // number of backticks, preceded by backslash
+    MaybeLaTex(usize, bool, LatexDelim), // number of backticks, preceded by backslash
     MaybeHtml,
     MaybeLinkOpen,
     // bool indicates whether or not the preceding section could be a reference
@@ -76,14 +77,11 @@ pub(crate) enum ItemBody {
     Strong,
     Strikethrough,
     Code(CowIndex),
+    InlineLatex(CowIndex),
     Link(LinkIndex),
     Image(LinkIndex),
     FootnoteReference(CowIndex),
     TaskListMarker(bool), // true for checked
-    #[allow(unused)]
-    InlineLatex,
-
-
     Rule,
     Heading(HeadingLevel, Option<HeadingIndex>), // heading level
     FencedCodeBlock(CowIndex),
@@ -115,6 +113,7 @@ impl<'a> ItemBody {
                 | ItemBody::MaybeSmartQuote(..)
                 | ItemBody::MaybeHtml
                 | ItemBody::MaybeCode(..)
+                | ItemBody::MaybeLaTex(..)
                 | ItemBody::MaybeLinkOpen
                 | ItemBody::MaybeLinkClose(..)
                 | ItemBody::MaybeImage
@@ -225,6 +224,7 @@ impl<'input, 'callback> Parser<'input, 'callback> {
     /// precedence, because the URL of links must not be processed.
     fn handle_inline_pass1(&mut self) {
         let mut code_delims = CodeDelims::new();
+        let mut latex_delimis = CodeDelims::new();
         let mut cur = self.tree.cur();
         let mut prev = None;
 
@@ -327,6 +327,52 @@ impl<'input, 'callback> Parser<'input, 'callback> {
                                     break;
                                 } else {
                                     code_delims.insert(delim_count, scan_ix);
+                                }
+                            }
+                            scan = self.tree[scan_ix].next;
+                        }
+                        if scan == None {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                        }
+                    }
+                }
+                ItemBody::MaybeLaTex(mut search_count, preceded_by_backslash, _latex_prefix) => {
+                    if preceded_by_backslash {
+                        search_count -= 1;
+                        if search_count == 0 {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                            prev = cur;
+                            cur = self.tree[cur_ix].next;
+                            continue;
+                        }
+                    }
+
+                    if latex_delimis.is_populated() {
+                        // we have previously scanned all codeblock delimiters,
+                        // so we can reuse that work
+                        if let Some(scan_ix) = latex_delimis.find(cur_ix, search_count) {
+                            self.make_latex_span(cur_ix, scan_ix, preceded_by_backslash);
+                        } else {
+                            self.tree[cur_ix].item.body = ItemBody::Text;
+                        }
+                    } else {
+                        // we haven't previously scanned all codeblock delimiters,
+                        // so walk the AST
+                        let mut scan = if search_count > 0 {
+                            self.tree[cur_ix].next
+                        } else {
+                            None
+                        };
+                        while let Some(scan_ix) = scan {
+                            if let ItemBody::MaybeLaTex(delim_count, ..) =
+                                self.tree[scan_ix].item.body
+                            {
+                                if search_count == delim_count {
+                                    self.make_latex_span(cur_ix, scan_ix, preceded_by_backslash);
+                                    latex_delimis.clear();
+                                    break;
+                                } else {
+                                    latex_delimis.insert(delim_count, scan_ix);
                                 }
                             }
                             scan = self.tree[scan_ix].next;
@@ -842,6 +888,94 @@ impl<'input, 'callback> Parser<'input, 'callback> {
             self.tree[close].item.start = self.tree[open].item.start + 1;
         } else {
             self.tree[open].item.body = ItemBody::Code(self.allocs.allocate_cow(cow));
+            self.tree[open].item.end = self.tree[close].item.end;
+            self.tree[open].next = self.tree[close].next;
+        }
+    }
+
+    /// Make a code span.
+    ///
+    /// Both `open` and `close` are matching MaybeCode items.
+    fn make_latex_span(
+        &mut self,
+        open: TreeIndex,
+        close: TreeIndex,
+        preceding_backslash: bool
+    ) {
+        let first_ix = self.tree[open].next.unwrap();
+        let bytes = self.text.as_bytes();
+        let mut span_start = self.tree[open].item.end;
+        let mut span_end = self.tree[close].item.start;
+        let mut buf: Option<String> = None;
+
+        // detect all-space sequences, since they are kept as-is as of commonmark 0.29
+        if !bytes[span_start..span_end].iter().all(|&b| b == b' ') {
+            let opening = matches!(bytes[span_start], b' ' | b'\r' | b'\n');
+            let closing = matches!(bytes[span_end - 1], b' ' | b'\r' | b'\n');
+            let drop_enclosing_whitespace = opening && closing;
+
+            if drop_enclosing_whitespace {
+                span_start += 1;
+                if span_start < span_end {
+                    span_end -= 1;
+                }
+            }
+
+            let mut ix = first_ix;
+
+            while ix != close {
+                let next_ix = self.tree[ix].next.unwrap();
+                if let ItemBody::HardBreak | ItemBody::SoftBreak = self.tree[ix].item.body {
+                    if drop_enclosing_whitespace {
+                        // check whether break should be ignored
+                        if ix == first_ix {
+                            ix = next_ix;
+                            span_start = min(span_end, self.tree[ix].item.start);
+                            continue;
+                        } else if next_ix == close && ix > first_ix {
+                            break;
+                        }
+                    }
+
+                    let end = bytes[self.tree[ix].item.start..]
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap()
+                        + self.tree[ix].item.start;
+                    if let Some(ref mut buf) = buf {
+                        buf.push_str(&self.text[self.tree[ix].item.start..end]);
+                        buf.push(' ');
+                    } else {
+                        let mut new_buf = String::with_capacity(span_end - span_start);
+                        new_buf.push_str(&self.text[span_start..end]);
+                        new_buf.push(' ');
+                        buf = Some(new_buf);
+                    }
+                } else if let Some(ref mut buf) = buf {
+                    let end = if next_ix == close {
+                        span_end
+                    } else {
+                        self.tree[ix].item.end
+                    };
+                    buf.push_str(&self.text[self.tree[ix].item.start..end]);
+                }
+                ix = next_ix;
+            }
+        }
+
+        let cow = if let Some(buf) = buf {
+            buf.into()
+        } else {
+            self.text[span_start..span_end].into()
+        };
+        if preceding_backslash {
+            self.tree[open].item.body = ItemBody::Text;
+            self.tree[open].item.end = self.tree[open].item.start + 1;
+            self.tree[open].next = Some(close);
+            self.tree[close].item.body = ItemBody::InlineLatex(self.allocs.allocate_cow(cow));
+            self.tree[close].item.start = self.tree[open].item.start + 1;
+        } else {
+            self.tree[open].item.body = ItemBody::InlineLatex(self.allocs.allocate_cow(cow));
             self.tree[open].item.end = self.tree[close].item.end;
             self.tree[open].next = self.tree[close].next;
         }
@@ -1446,8 +1580,9 @@ fn item_to_tag<'a>(item: &Item, allocs: &Allocations<'a>) -> Tag<'a> {
 fn item_to_event<'a>(item: Item, text: &'a str, allocs: &Allocations<'a>) -> Event<'a> {
     let tag = match item.body {
         ItemBody::Text => return Event::Text(text[item.start..item.end].into()),
-        ItemBody::BlockLatex => return Event::BlockLatex(text[item.start..item.end].into()),
+        ItemBody::BlockLatex => return Event::BlockLaTex(text[item.start..item.end].into()),
         ItemBody::Code(cow_ix) => return Event::Code(allocs[cow_ix].clone()),
+        ItemBody::InlineLatex(cow_ix) => return Event::InlineLaTex(allocs[cow_ix].clone()),
         ItemBody::SynthesizeText(cow_ix) => return Event::Text(allocs[cow_ix].clone()),
         ItemBody::SynthesizeChar(c) => return Event::Text(c.into()),
         ItemBody::Html => return Event::Html(text[item.start..item.end].into()),

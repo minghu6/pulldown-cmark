@@ -46,7 +46,8 @@ struct FirstPass<'a, 'b> {
     lookup_table: &'b LookupTable,
 }
 
-enum LatexDelim {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum LatexDelim {
     Dollar,
     Bracket,
 }
@@ -341,7 +342,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             } else {
                 TableParseMode::Disabled
             };
-    
+
             let (next_ix, brk) = self.parse_line(ix, None, scan_mode);
 
             // break out when we find a table
@@ -475,7 +476,8 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         let mut last_pipe_ix = start;
         let mut begin_text = start;
 
-        let (final_ix, brk) = iterate_special_bytes(self.lookup_table, bytes, start, |ix, byte| {
+        let (final_ix, brk) =
+        iterate_special_bytes(self.lookup_table, bytes, start, |ix, byte| {
             match byte {
                 b'\n' | b'\r' => {
                     if let TableParseMode::Active = mode {
@@ -566,7 +568,18 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                             });
                             begin_text = ix + 1 + count;
                             LoopInstruction::ContinueAndSkip(count)
-                        } else {
+                        }
+                        else if bytes[ix + 1] == b'$' {
+                            let count = 1 + scan_ch_repeat(&bytes[(ix + 2)..], b'$');
+                            self.tree.append(Item {
+                                start: ix + 1,
+                                end: ix + count + 1,
+                                body: ItemBody::MaybeLaTex(count, true, LatexDelim::Dollar),
+                            });
+                            begin_text = ix + 1 + count;
+                            LoopInstruction::ContinueAndSkip(count)
+                        }
+                        else {
                             begin_text = ix + 1;
                             LoopInstruction::ContinueAndSkip(1)
                         }
@@ -601,6 +614,17 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                         start: ix,
                         end: ix + count,
                         body: ItemBody::MaybeCode(count, false),
+                    });
+                    begin_text = ix + count;
+                    LoopInstruction::ContinueAndSkip(count - 1)
+                }
+                b'$' => {
+                    self.tree.append_text(begin_text, ix);
+                    let count = 1 + scan_ch_repeat(&bytes[(ix + 1)..], b'$');
+                    self.tree.append(Item {
+                        start: ix,
+                        end: ix + count,
+                        body: ItemBody::MaybeLaTex(count, false, LatexDelim::Dollar),
                     });
                     begin_text = ix + count;
                     LoopInstruction::ContinueAndSkip(count - 1)
@@ -882,7 +906,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
         // println!("en: {}", &self.text[start_ix..]);
 
         let n = scan_ws(&bytes[start_ix..]);
-        
+
         if start_ix + n + 1 >= bytes.len() {
             return start_ix;
         }
@@ -897,7 +921,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             return start_ix;
         }
 
-        let cap = 
+        let cap =
         match delim {
             LatexDelim::Dollar => {
                 REG_LATEX_DOLLAR.captures(&bytes[start_ix + n..])
@@ -1568,7 +1592,7 @@ fn create_lut(options: &Options) -> LookupTable {
 fn special_bytes(options: &Options) -> [bool; 256] {
     let mut bytes = [false; 256];
     let standard_bytes = [
-        b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`',
+        b'\n', b'\r', b'*', b'_', b'&', b'\\', b'[', b']', b'<', b'!', b'`', b'$'
     ];
 
     for &byte in &standard_bytes {
